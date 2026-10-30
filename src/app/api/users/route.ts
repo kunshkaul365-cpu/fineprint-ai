@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStoredUsers, registerUserSignup } from "@/lib/serverStore";
-import { getSupabaseClient } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 import { sanitizeShortText } from "@/lib/sanitize";
 
 export async function GET() {
@@ -32,7 +32,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const supabase = getSupabaseClient();
     if (supabase) {
       try {
         await supabase.auth.signInWithOtp({
