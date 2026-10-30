@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStoredUsers, registerUserSignup } from "@/lib/serverStore";
+import { getSupabaseClient } from "@/lib/supabase";
+import { sanitizeShortText } from "@/lib/sanitize";
 
 export async function GET() {
   try {
@@ -16,14 +18,12 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const {
-      fullName,
-      email,
-      persona = "Student / Job Seeker",
-      organization = "",
-      feedbackNote = "",
-      estimatedSavingsInr = 45000,
-    } = body;
+    const fullName = sanitizeShortText(body?.fullName || "", 80);
+    const email = sanitizeShortText(body?.email || "", 120).toLowerCase();
+    const persona = body?.persona || "Student / Job Seeker";
+    const organization = sanitizeShortText(body?.organization || "", 100);
+    const feedbackNote = sanitizeShortText(body?.feedbackNote || "", 400);
+    const estimatedSavingsInr = Number(body?.estimatedSavingsInr) || 45000;
 
     if (!fullName || !email || !email.includes("@")) {
       return NextResponse.json(
@@ -32,13 +32,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        await supabase.auth.signInWithOtp({
+          email,
+          options: {
+            shouldCreateUser: true,
+            data: { full_name: fullName, persona },
+          },
+        });
+      } catch {
+        // Non-blocking if SMTP is rate-limited
+      }
+    }
+
     const user = await registerUserSignup({
       fullName,
       email,
       persona,
       organization,
       feedbackNote,
-      estimatedSavingsInr: Number(estimatedSavingsInr) || 45000,
+      estimatedSavingsInr,
     });
 
     const allUsers = await getStoredUsers();
