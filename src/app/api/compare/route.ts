@@ -4,6 +4,8 @@ import {
   getStoredComparisons,
   saveComparisonToDatabase,
 } from "@/lib/serverStore";
+import { checkRateLimit } from "@/lib/rateLimiter";
+import { sanitizeContractInput, sanitizeShortText } from "@/lib/sanitize";
 
 export async function GET() {
   try {
@@ -19,6 +21,19 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    const rate = await checkRateLimit(req);
+    if (!rate.allowed) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Rate limit reached (${rate.limit} requests/min). Please wait ${Math.ceil(
+            rate.resetMs / 1000
+          )}s.`,
+        },
+        { status: 429 }
+      );
+    }
+
     const body = await req.json();
     const {
       docATitle = "Instrument A",
@@ -27,7 +42,10 @@ export async function POST(req: NextRequest) {
       docBText = "",
     } = body;
 
-    if (!docAText.trim() || !docBText.trim()) {
+    const cleanA = sanitizeContractInput(docAText).sanitized;
+    const cleanB = sanitizeContractInput(docBText).sanitized;
+
+    if (!cleanA || !cleanB) {
       return NextResponse.json(
         {
           ok: false,
@@ -38,10 +56,10 @@ export async function POST(req: NextRequest) {
     }
 
     const comparison = await compareContractsWithAI({
-      docATitle,
-      docAText,
-      docBTitle,
-      docBText,
+      docATitle: sanitizeShortText(docATitle) || "Instrument A",
+      docAText: cleanA,
+      docBTitle: sanitizeShortText(docBTitle) || "Instrument B",
+      docBText: cleanB,
     });
 
     const saved = await saveComparisonToDatabase(comparison);

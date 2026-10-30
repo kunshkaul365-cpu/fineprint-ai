@@ -3,6 +3,13 @@ import { analyzeContractWithAI } from "@/lib/aiEngine";
 import { getStoredAudits, saveAuditToDatabase } from "@/lib/serverStore";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { ContractCategory } from "@/types/fineprint";
+import { checkRateLimit } from "@/lib/rateLimiter";
+import {
+  MAX_CONTRACT_CHARS,
+  MIN_CONTRACT_CHARS,
+  sanitizeContractInput,
+  sanitizeShortText,
+} from "@/lib/sanitize";
 
 export async function GET() {
   try {
@@ -23,6 +30,25 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    const rate = await checkRateLimit(req);
+    if (!rate.allowed) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Rate limit reached (${rate.limit} audits per minute). Please wait ${Math.ceil(
+            rate.resetMs / 1000
+          )} seconds before running another audit.`,
+        },
+        {
+          status: 429,
+          headers: {
+            "X-RateLimit-Limit": String(rate.limit),
+            "X-RateLimit-Remaining": String(rate.remaining),
+          },
+        }
+      );
+    }
+
     const body = await req.json();
     const {
       documentTitle = "Untitled Agreement",
@@ -38,32 +64,56 @@ export async function POST(req: NextRequest) {
       userName?: string;
     };
 
-    if (!rawText || rawText.trim().length < 20) {
+    if (typeof rawText === "string" && rawText.length > MAX_CONTRACT_CHARS + 500) {
       return NextResponse.json(
         {
           ok: false,
-          error:
-            "Please enter or upload at least a few lines of a contract, offer letter, or rent agreement.",
+          error: `Contract text exceeds the maximum limit of ${MAX_CONTRACT_CHARS.toLocaleString()} characters.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    const { sanitized, injectionFlagged } = sanitizeContractInput(rawText);
+    const cleanTitle =
+      sanitizeShortText(documentTitle) || `${category} Examination`;
+
+    if (!sanitized || sanitized.length < MIN_CONTRACT_CHARS) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Please provide at least ${MIN_CONTRACT_CHARS} characters of valid contract clauses.`,
         },
         { status: 400 }
       );
     }
 
     const auditResult = await analyzeContractWithAI({
-      documentTitle,
+      documentTitle: cleanTitle,
       category,
-      rawText,
+      rawText: sanitized,
     });
 
-    auditResult.userEmail = userEmail;
-    auditResult.userName = userName;
+    auditResult.userEmail = userEmail ? sanitizeShortText(userEmail, 120) : undefined;
+    auditResult.userName = userName ? sanitizeShortText(userName, 80) : undefined;
 
     const saved = await saveAuditToDatabase(auditResult);
 
-    return NextResponse.json({
-      ok: true,
-      audit: saved,
-    });
+    return NextResponse.json(
+      {
+        ok: true,
+        audit: saved,
+        sanitizedNotice: injectionFlagged
+          ? "Potentially unsafe prompt instructions were stripped prior to analysis."
+          : undefined,
+      },
+      {
+        headers: {
+          "X-RateLimit-Limit": String(rate.limit),
+          "X-RateLimit-Remaining": String(rate.remaining),
+        },
+      }
+    );
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: (error as Error).message },
