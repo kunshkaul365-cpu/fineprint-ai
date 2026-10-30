@@ -60,6 +60,7 @@ export default function FinePrintApp() {
     null
   );
   const [auditVault, setAuditVault] = useState<ContractAuditResult[]>([]);
+  const [docketFilter, setDocketFilter] = useState<"all" | "mine">("all");
 
   const [users, setUsers] = useState<UserProfileSignup[]>([]);
   const [currentUser, setCurrentUser] = useState<UserProfileSignup | null>(
@@ -112,9 +113,6 @@ export default function FinePrintApp() {
       .then((data) => {
         if (data.ok && Array.isArray(data.audits)) {
           setAuditVault(data.audits);
-          if (data.audits.length > 0) {
-            setActiveAudit(data.audits[0]);
-          }
         }
       })
       .catch(() => {});
@@ -254,6 +252,19 @@ export default function FinePrintApp() {
     if (!activeAudit) return;
     exportAuditAsPdf(activeAudit);
   };
+
+  const activeEmail = (
+    sessionUser?.email ||
+    currentUser?.email ||
+    ""
+  ).toLowerCase();
+
+  const filteredVault =
+    docketFilter === "mine" && activeEmail
+      ? auditVault.filter(
+          (item) => item.userEmail?.toLowerCase() === activeEmail
+        )
+      : auditVault;
 
   return (
     <div className="min-h-screen bg-[#FBF9F5] text-stone-900 flex flex-col">
@@ -562,6 +573,15 @@ export default function FinePrintApp() {
                         3. Omissions & Counsel Q&A
                       </button>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={handleExportReport}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-800 hover:bg-stone-50 transition cursor-pointer"
+                    >
+                      <Download className="h-3.5 w-3.5 text-amber-800" />
+                      Export PDF
+                    </button>
                   </div>
 
                   {opinionSubTab === "clauses" && (
@@ -755,23 +775,52 @@ export default function FinePrintApp() {
                   Database Archive
                 </span>
                 <h2 className="font-legal-serif text-2xl font-semibold text-stone-900">
-                  Case Docket ({auditVault.length} Examined Instruments)
+                  Case Docket ({filteredVault.length} Examined Instruments)
                 </h2>
                 <p className="text-xs text-stone-600">
                   All user-submitted contracts examined and stored in your
                   Supabase PostgreSQL database (`contract_audits` table).
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setActiveTab("scanner")}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-stone-900 px-4 py-2 text-xs font-semibold text-white cursor-pointer"
-              >
-                Examine New Instrument
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                {activeEmail && (
+                  <div className="inline-flex rounded-lg border border-stone-200 bg-stone-100 p-1">
+                    <button
+                      type="button"
+                      onClick={() => setDocketFilter("all")}
+                      className={`rounded-md px-3 py-1 text-xs font-medium cursor-pointer ${
+                        docketFilter === "all"
+                          ? "bg-white text-stone-900 shadow-2xs"
+                          : "text-stone-600"
+                      }`}
+                    >
+                      All Cases
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDocketFilter("mine")}
+                      className={`rounded-md px-3 py-1 text-xs font-medium cursor-pointer ${
+                        docketFilter === "mine"
+                          ? "bg-white text-stone-900 shadow-2xs"
+                          : "text-stone-600"
+                      }`}
+                    >
+                      My Saved History
+                    </button>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("scanner")}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-stone-900 px-4 py-2 text-xs font-semibold text-white cursor-pointer"
+                >
+                  Examine New Instrument
+                </button>
+              </div>
             </div>
 
-            {auditVault.length === 0 ? (
+            {filteredVault.length === 0 ? (
               <div className="rounded-xl border border-dashed border-stone-300 bg-white/60 p-12 text-center space-y-2">
                 <p className="font-legal-serif text-lg font-medium text-stone-800">
                   No Examined Instruments in Database Yet
@@ -783,7 +832,7 @@ export default function FinePrintApp() {
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                {auditVault.map((item) => (
+                {filteredVault.map((item) => (
                   <div
                     key={item.id}
                     className="flex flex-col justify-between rounded-xl border border-stone-200 bg-white p-5 shadow-2xs hover:border-stone-300 transition"
@@ -819,17 +868,27 @@ export default function FinePrintApp() {
                       <span className="font-mono text-[11px] text-stone-600">
                         {item.estimatedFinancialExposure}
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveAudit(item);
-                          setActiveTab("scanner");
-                        }}
-                        className="inline-flex items-center gap-1 text-xs font-semibold text-stone-900 hover:underline cursor-pointer"
-                      >
-                        Open Memorandum
-                        <ArrowUpRight className="h-3.5 w-3.5" />
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => exportAuditAsPdf(item)}
+                          className="inline-flex items-center gap-1 text-xs font-medium text-stone-600 hover:text-stone-900 cursor-pointer"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          PDF
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveAudit(item);
+                            setActiveTab("scanner");
+                          }}
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-stone-900 hover:underline cursor-pointer"
+                        >
+                          Open Memorandum
+                          <ArrowUpRight className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -863,8 +922,8 @@ export default function FinePrintApp() {
             </span>
           </div>
           <span className="font-mono text-[11px] text-stone-500">
-            AI-Generated Analysis • Not a Substitute for Legal Advice • Indian
-            Contract Act, 1872
+            AI-Generated Analysis • Not a Substitute for Qualified Legal Advice
+            • Indian Contract Act, 1872 Reference
           </span>
         </div>
       </footer>
